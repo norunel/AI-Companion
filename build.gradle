@@ -115,6 +115,8 @@ neoForge {
     }
 }
 
+apply from: 'gradle/gametests.gradle'
+
 // Sets up a dependency configuration called 'localRuntime'.
 // This configuration should be used instead of 'runtimeOnly' to declare
 // a dependency that will be present for runtime testing but that is
@@ -168,6 +170,14 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
 // Include the output of "generateModMetadata" as an input directory for the build
 // this works with both building through Gradle and the IDE.
 sourceSets.main.resources.srcDir generateModMetadata
+
+// Selected tests use their own namespace so the original registrations stay disabled.
+var selectedGameTestResources = tasks.register('selectedGameTestResources', Sync) {
+    from('src/main/resources/data/aicompanion/structure') { include '*.nbt' }
+    into layout.buildDirectory.dir('generated/gametestResources/data/aicompanion_test/structure')
+}
+sourceSets.main.resources.srcDir layout.buildDirectory.dir('generated/gametestResources')
+tasks.named('processResources').configure { dependsOn selectedGameTestResources }
 // To avoid having to run "generateModMetadata" manually, make it run on every project reload
 neoForge.ideSyncTask generateModMetadata
 
@@ -192,6 +202,7 @@ tasks.withType(JavaCompile).configureEach {
 // Regression fixtures are available to development runs, not installed in players' worlds.
 tasks.named('jar', Jar).configure {
     exclude 'dev/aicompanion/gametest/**'
+    exclude 'data/aicompanion_test/**'
     exclude 'dev/aicompanion/entity/CompanionStairApproachTests*.class'
     exclude 'data/aicompanion/structure/empty.nbt'
     exclude 'data/aicompanion/structure/large_search.nbt'

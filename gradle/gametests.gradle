@@ -1,0 +1,56 @@
+import dev.aicompanion.build.VerifyGameTestReport
+import dev.aicompanion.build.SaveGameTestExitCode
+import java.time.Duration
+
+def suite = providers.gradleProperty('gameTestSuite').orElse('quick').get()
+if (!(suite in ['quick', 'full'])) {
+    throw new GradleException('gameTestSuite must be quick or full')
+}
+def repetitions = providers.gradleProperty('gameTestRepeats').orElse('1').get().toInteger()
+def timeoutSeconds = providers.gradleProperty('gameTestTimeout').orElse('900').get().toLong()
+if (repetitions < 1 || repetitions > 20 || timeoutSeconds < 1) {
+    throw new GradleException('gameTestRepeats must be 1..20 and gameTestTimeout must be positive')
+}
+def testFilter = providers.gradleProperty('gameTestFilter').orElse('*').get()
+def verify = tasks.register('verifyGameTests') {
+    group = 'verification'
+    description = 'Runs selected GameTests in fresh worlds and checks complete reports.'
+}
+
+def previousReport = null
+(1..repetitions).each { iteration ->
+    def reports = layout.buildDirectory.dir("reports/gametests/${suite}-${iteration}")
+    def world = layout.buildDirectory.dir("gametest-runs/${suite}-${iteration}")
+    def previous = previousReport
+    def reset = tasks.register("resetGameTests${iteration}", Delete) {
+        // Only these disposable build directories are reused between invocations.
+        delete reports, world
+        if (previous != null) mustRunAfter previous
+    }
+    neoForge.runs.create("selectedGameTests${iteration}") {
+        type = 'gameTestServer'
+        gameDirectory = world
+        disableIdeRun()
+        logLevel = org.slf4j.event.Level.INFO
+        systemProperty 'neoforge.enabledGameTestNamespaces', 'aicompanion_test'
+        systemProperty 'aicompanion.testFilter', testFilter
+        systemProperty 'aicompanion.testMaxTicks', suite == 'quick' ? '2400' : '0'
+        systemProperty 'aicompanion.testReports', reports.get().asFile.absolutePath
+    }
+    def run = tasks.named("runSelectedGameTests${iteration}", JavaExec)
+    def report = tasks.register("verifyGameTestReport${iteration}", VerifyGameTestReport) {
+        mustRunAfter run
+        reportDirectory = reports
+        gameDirectory = world
+    }
+    run.configure {
+        dependsOn reset
+        maxHeapSize = '2G'
+        ignoreExitValue = true // The report task checks both the exit code and the results.
+        timeout = Duration.ofSeconds(timeoutSeconds)
+        doLast new SaveGameTestExitCode(reports.get().asFile)
+        finalizedBy report
+    }
+    verify.configure { dependsOn run }
+    previousReport = report
+}
